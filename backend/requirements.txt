@@ -1,0 +1,17 @@
+fastapi>=0.142
+uvicorn[standard]>=0.35
+sqlmodel>=0.0.47
+snowflake-connector-python[pandas]>=4.8
+pandas>=2.3
+pyarrow>=21
+sqlglot>=30
+playwright>=1.63
+openai>=3.0
+pyjwt>=2.10
+bcrypt>=4.3
+cryptography>=46
+pydantic-settings>=2.10
+email-validator>=2.2
+python-multipart>=0.0.20
+pytest>=8.4
+httpx>=0.28

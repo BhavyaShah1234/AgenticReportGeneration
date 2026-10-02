@@ -1,0 +1,4 @@
+snowflake-connector-python[pandas]==4.8.0
+pandas==2.3.3
+pyarrow==23.0.1
+kagglehub==1.0.2
