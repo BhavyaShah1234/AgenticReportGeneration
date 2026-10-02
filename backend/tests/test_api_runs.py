@@ -38,7 +38,7 @@ def test_run_requires_params(sf_designer, formats):
 
 @pytest.mark.snowflake
 def test_client_quarterly_review_run(sf_designer, formats, monkeypatch):
-    monkeypatch.setattr(agent_service, "get_llm", lambda: _FailingLLM())
+    monkeypatch.setattr(agent_service, "get_llm", lambda *a, **k: _FailingLLM())
     fid = formats["Client Quarterly Review"]["id"]
     r = sf_designer.post("/api/runs", json={"format_id": fid, "values": VALUES})
     assert r.status_code == 200, r.text
@@ -79,7 +79,7 @@ def test_client_quarterly_review_run(sf_designer, formats, monkeypatch):
 
 @pytest.mark.snowflake
 def test_product_line_performance_run(sf_designer, formats, monkeypatch):
-    monkeypatch.setattr(agent_service, "get_llm", lambda: _FailingLLM())
+    monkeypatch.setattr(agent_service, "get_llm", lambda *a, **k: _FailingLLM())
     fid = formats["Product Line Performance"]["id"]
     run = sf_designer.post("/api/runs", json={"format_id": fid, "values": {"period": VALUES["period"]}}).json()
     errors = {k: v["error"] for k, v in run["snapshot"]["data"].items() if v["error"]}
@@ -96,7 +96,7 @@ def test_pdf_download_filename(sf_designer, formats, monkeypatch, tmp_path):
         p.write_bytes(b"%PDF-1.4\n%%EOF\n")
         return p
 
-    monkeypatch.setattr(agent_service, "get_llm", lambda: _FailingLLM())
+    monkeypatch.setattr(agent_service, "get_llm", lambda *a, **k: _FailingLLM())
     monkeypatch.setattr(run_service, "render_run_pdf", fake_render)
     fid = formats["Client Quarterly Review"]["id"]
     run = sf_designer.post("/api/runs", json={"format_id": fid, "values": VALUES}).json()

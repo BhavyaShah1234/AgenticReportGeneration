@@ -3,6 +3,7 @@
 import secrets
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -37,6 +38,11 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:11434/v1"
     llm_model: str = "qwen3:8b"
     llm_api_key: str = "ollama"
+    # LLM_PROVIDER=cortex: run on Snowflake Cortex open-weight models through the company's own
+    # Snowflake connection; LLM_FALLBACK keeps the OpenAI-compatible endpoint above as a backup.
+    llm_provider: Literal["openai", "cortex"] = "openai"
+    cortex_model: str = "llama3.1-70b"
+    llm_fallback: bool = True
 
 
 @lru_cache

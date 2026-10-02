@@ -31,9 +31,9 @@ def _http(e: Exception) -> HTTPException:
 
 @router.get("/health", response_model=AgentHealthOut)
 async def agent_health(user: User = Depends(current_user)) -> AgentHealthOut:
-    llm = get_llm()
+    llm = get_llm(user.company_id)
     ok, err = await llm.health()
-    return AgentHealthOut(ok=ok, model=llm.model, base_url=llm.base_url, error=err)
+    return AgentHealthOut(ok=ok, model=llm.label, base_url=llm.base_url, error=err)
 
 
 @router.post("/widget", response_model=AgentWidgetOut)

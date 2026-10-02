@@ -110,6 +110,17 @@ export function TextWidget({ spec, data, mode }: { spec: WidgetSpec; data?: Widg
       <div className="space-y-2 text-sm leading-relaxed text-zinc-700">
         <MarkdownLite text={text} />
       </div>
+      {spec.options?.narrative && typeof data?.meta?.model === "string" && (
+        <p className="mt-2 text-[11px] text-zinc-400">Written by {describeModel(data.meta.model as string)}</p>
+      )}
     </div>
   );
+}
+
+/** "cortex:llama3.3-70b" -> "llama3.3-70b (open-weight) via Snowflake Cortex"; "ollama:qwen3:8b" -> "qwen3:8b (open-weight) via Ollama". */
+function describeModel(label: string): string {
+  const [provider, ...rest] = label.split(":");
+  const model = rest.join(":") || label;
+  const via = provider === "cortex" ? "Snowflake Cortex" : provider === "ollama" ? "Ollama, running locally" : provider;
+  return `${model} (open-weight) via ${via}`;
 }
