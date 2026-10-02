@@ -6,8 +6,13 @@ know which columns are x / y / label / value.
 
 Contract used by the rest of the backend (implemented in `app.archetypes.engine`):
 
-    execute_widget(client, widget, *, param_defs, runtime_values, default_source) -> WidgetData
-    list_archetypes(company_id: str | None = None) -> list[ArchetypeSpec]
+    execute_widget(client, widget, *, param_defs, runtime_values, default_source,
+                   custom_archetypes) -> WidgetData
+    list_archetypes(custom: list[CustomArchetypeDef]) -> list[ArchetypeSpec]
+    validate_custom_sql(sql) -> None   (raises ValueError)
+
+Output columns whose names start with `__` are helpers: `meta()` may read them, then the
+engine drops them before returning rows.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from typing import Any, ClassVar
 import pandas as pd
 from pydantic import BaseModel
 
+from app.archetypes.sqlutil import col as _col
 from app.schemas.report import ArchetypeSpec, DateRange, Encoding, WidgetType
 
 
@@ -31,6 +37,9 @@ class CompileContext:
     included in `where_sql` too, *and* exposed separately via `date_range`/`date_column`
     so period-comparison archetypes (kpi_summary, period_over_period) can rebuild it.
     `where_sql_without_dates` is the same filter set minus the date-range predicate.
+
+    `table` is the validated, double-quoted table reference. `columns` maps the table's
+    UPPERCASE column names to "string" | "number" | "date" (empty = unknown, skip checks).
     """
 
     table: str
@@ -40,6 +49,12 @@ class CompileContext:
     date_range: DateRange | None = None
     date_column: str | None = None
     runtime_values: dict[str, Any] = field(default_factory=dict)
+    columns: dict[str, str] = field(default_factory=dict)
+    max_rows: int = 5000
+
+    def col(self, name: str) -> str:
+        """Validated, double-quoted column identifier (raises ValueError)."""
+        return _col(name, self.columns)
 
 
 @dataclass
@@ -67,6 +82,10 @@ class Archetype(ABC):
 
     def meta(self, df: pd.DataFrame, params: BaseModel, ctx: CompileContext) -> dict[str, Any]:
         return {}
+
+    def finalize_encoding(self, enc: Encoding, df: pd.DataFrame, params: BaseModel) -> Encoding:
+        """Hook for data-dependent encodings (e.g. pivot's dynamic value columns)."""
+        return enc
 
     @classmethod
     def spec(cls) -> ArchetypeSpec:

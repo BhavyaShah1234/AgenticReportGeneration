@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     storage_dir: Path = BACKEND_DIR / "storage"
     frontend_url: str = "http://localhost:3000"
     jwt_ttl_hours: int = 24
+    # Public demo: new companies created at signup get the server's demo Snowflake
+    # connection and the demo report formats, so judges can use the app immediately.
+    demo_mode: bool = False
 
     # Optional server-side Snowflake connection, used by tests and seeding only.
     # End users connect their own account through the UI.

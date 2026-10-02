@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fafafa;
+  --foreground: #18181b;
 }
 
 @theme inline {
@@ -12,15 +12,62 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ---- Designer canvas (react-grid-layout overrides) ---- */
+.designer-canvas {
+  background-color: #fff;
+  background-image: radial-gradient(circle, #e4e4e7 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.designer-canvas .react-grid-item.react-grid-placeholder {
+  background: #6366f1;
+  opacity: 0.15;
+  border-radius: 0.75rem;
+}
+
+.designer-canvas .react-grid-item > .react-resizable-handle::after {
+  border-color: #a1a1aa;
+}
+
+/* ---- Print report ---- */
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+.print-root,
+.print-root * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* A4 sheet on screen; in print the @page margin provides the 12mm border, leaving 186mm. */
+.print-sheet {
+  box-sizing: border-box;
+  width: 210mm;
+  padding: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .print-sheet {
+    width: 186mm;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .print-band,
+  .print-widget {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
