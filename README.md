@@ -25,7 +25,7 @@ Built for the MLH Hacktoberfest x Sunhacks hackathon. Agentic Reports is a repor
 |---|---|
 | Frontend | Next.js 16 (Node 26), React 19, Tailwind v4, react-grid-layout v2, Recharts 3, zustand |
 | Backend | FastAPI (Python 3.14), SQLModel/SQLite for app metadata, snowflake-connector-python, pandas, sqlglot, Playwright |
-| LLM | Any OpenAI-compatible endpoint. Defaults to local **Ollama `qwen3:8b`**; a hosted endpoint such as Voyager only needs different config |
+| LLM (open-weight only) | **Snowflake Cortex** (`llama3.3-70b` by default, through the company's own Snowflake connection) with automatic fallback to local **Ollama `qwen3:8b`**. Any other OpenAI-compatible endpoint, such as Voyager, needs only config |
 | Data | Kaggle [sample-sales-data](https://www.kaggle.com/datasets/kyanyoga/sample-sales-data) in `DEMO_CORP.SALES`: 2,823 order lines, 92 B2B clients, 2003–2005 (see `data/README.md`) |
 
 ```
@@ -35,6 +35,15 @@ data/      Kaggle → Snowflake loader
 scripts/   demo hosting (Cloudflare quick tunnel), Snowflake demo role, connection check
 docs/API.md  HTTP contract
 ```
+
+## AI providers (open-weight models)
+| `LLM_PROVIDER` | What runs the agent and narratives |
+|---|---|
+| `openai` (default) | The OpenAI-compatible endpoint at `LLM_BASE_URL` / `LLM_MODEL`. The default is local Ollama `qwen3:8b`; Voyager and vLLM also work. |
+| `cortex` | **Snowflake Cortex** inside each company's own Snowflake account, using its connection (account and PAT) and Cortex's OpenAI-compatible REST API (`/api/v2/cortex/v1`). The model is `CORTEX_MODEL`, default `llama3.3-70b`; `mistral-large2` and `llama3.1-8b` are other options. With `LLM_FALLBACK=true` (the default), a failing Cortex call falls back to the endpoint above, and Cortex is retried after 5 minutes. |
+
+Each AI narrative in a generated report names the model that wrote it. `GET /api/agent/health` shows the active provider. `scripts/check_cortex.py` probes which Cortex models your account can use.
+**Note:** Snowflake disables Cortex AI functions on *trial* accounts. Every model returns `399258 … not available for trial accounts`, and the REST API returns 403. Use the account provided by the event organisers, or a non-trial account, to run on Cortex. Until then the demo answers from the local open-weight fallback.
 
 ## Run locally
 ```bash
@@ -53,6 +62,7 @@ Demo logins: `designer@classicmodels.com` / `viewer@classicmodels.com`, password
 scripts/demo_start.sh     # seed, build, start both servers on 127.0.0.1, open tunnel, print public URL
 scripts/demo_status.sh    # processes, local health, public URL reachability, sleep warnings
 scripts/demo_stop.sh      # close the tunnel first, then stop the servers
+scripts/demo_restart_app.sh  # deploy code changes, keeping the tunnel (and URL) up
 ```
 - Nothing listens on a public interface. Only the `*.trycloudflare.com` tunnel to Next.js (:3000) is exposed, and Next proxies `/api` to FastAPI.
 - `DEMO_MODE=1`: every company created at signup gets the demo Snowflake connection and the sample formats, so judges can sign up with any email and start immediately. The login page shows one-click demo accounts. The shared demo company's connection can't be changed.

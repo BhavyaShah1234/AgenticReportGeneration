@@ -338,7 +338,7 @@ async def design_widget(
     def validate(raw, final=False):
         return validate_simple_widget(raw, arch_map, col_types)
 
-    simple: SimpleWidget = await _loop(get_llm(), messages, _widget_schema(list(arch_map), list(col_types)), "widget", validate)
+    simple: SimpleWidget = await _loop(get_llm(company_id), messages, _widget_schema(list(arch_map), list(col_types)), "widget", validate)
     spec = to_widget_spec(simple, table)
     bottom = max((w.layout.y + w.layout.h for w in existing), default=0)
     spec.layout.y = bottom
@@ -415,7 +415,7 @@ async def design_report(company_id: str, prompt: str, table: str) -> tuple[Repor
         return (name, str(raw.get("description") or ""), params, widgets, str(raw.get("explanation") or "")), errors
 
     name, description, params, simples, explanation = await _loop(
-        get_llm(), messages, _report_schema(list(arch_map), list(col_types)), "report", validate
+        get_llm(company_id), messages, _report_schema(list(arch_map), list(col_types)), "report", validate
     )
     specs = [to_widget_spec(w, table) for w in simples]
     pack_layout(specs)
@@ -495,12 +495,18 @@ def _scope_text(values: dict[str, Any]) -> str:
 
 
 async def write_narrative(
-    format_name: str, values: dict[str, Any], widget: WidgetSpec, widgets: list[WidgetSpec], data: dict[str, WidgetData]
-) -> tuple[str, str]:
-    """Returns (text, source) where source is 'llm' or 'fallback'."""
+    format_name: str,
+    values: dict[str, Any],
+    widget: WidgetSpec,
+    widgets: list[WidgetSpec],
+    data: dict[str, WidgetData],
+    company_id: str | None = None,
+) -> tuple[str, str, str | None]:
+    """Returns (text, source, model): source is 'llm' or 'fallback'; model is the provider label
+    that wrote it (e.g. 'cortex:llama3.3-70b'), or None for the deterministic fallback."""
     digest = data_digest(widgets, data)
     if not digest:
-        return fallback_narrative(format_name, values, widgets, data), "fallback"
+        return fallback_narrative(format_name, values, widgets, data), "fallback", None
     guidance = (widget.options.text or "").strip()
     messages = [
         {
@@ -517,10 +523,11 @@ async def write_narrative(
         },
     ]
     try:
-        text = await get_llm().chat(messages, temperature=0.3, max_tokens=500)
+        llm = get_llm(company_id)
+        text = await llm.chat(messages, temperature=0.3, max_tokens=500)
         if len(text.strip()) < 20:
             raise LLMError("empty narrative")
-        return text.strip(), "llm"
+        return text.strip(), "llm", llm.label
     except Exception as e:
         log.warning("narrative LLM failed, using fallback: %s", e)
-        return fallback_narrative(format_name, values, widgets, data), "fallback"
+        return fallback_narrative(format_name, values, widgets, data), "fallback", None

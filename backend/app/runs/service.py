@@ -106,8 +106,10 @@ async def generate(company_id: str, user: User, format_id: str, format_name: str
         data = await run_in_threadpool(_execute_all, client, body, values, default_source, customs)
         for w in body.widgets:
             if w.type == "text" and w.options.narrative:
-                text, source = await agent.write_narrative(format_name, values, w, body.widgets, data)
-                data[w.id] = WidgetData(widget_id=w.id, meta={"text": text, "source": source})
+                text, source, model = await agent.write_narrative(
+                    format_name, values, w, body.widgets, data, company_id=company_id
+                )
+                data[w.id] = WidgetData(widget_id=w.id, meta={"text": text, "source": source, "model": model})
         snapshot = RunSnapshot(
             format=body, values=values, data=data, generated_at=datetime.now(UTC), company_name=company_name
         )

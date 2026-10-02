@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from openai import AsyncOpenAI, BadRequestError, UnprocessableEntityError
@@ -55,12 +56,33 @@ def extract_json(text: str) -> Any:
 
 
 class LLMClient:
-    def __init__(self, base_url: str | None = None, model: str | None = None, api_key: str | None = None, timeout: float = 180):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout: float = 180,
+        *,
+        provider: str = "openai",
+        default_headers: dict[str, str] | None = None,
+        caps: dict[str, bool] | None = None,
+    ):
         s = get_settings()
         self.base_url = base_url or s.llm_base_url
         self.model = model or s.llm_model
-        self.client = AsyncOpenAI(base_url=self.base_url, api_key=api_key or s.llm_api_key or "none", timeout=timeout, max_retries=0)
-        self._caps = _CAPS.setdefault(self.base_url, {"reasoning_effort": True, "json_schema": True})
+        self.provider = provider
+        self.client = AsyncOpenAI(
+            base_url=self.base_url,
+            api_key=api_key or s.llm_api_key or "none",
+            timeout=timeout,
+            max_retries=0,
+            default_headers=default_headers,
+        )
+        self._caps = _CAPS.setdefault(self.base_url, {"reasoning_effort": True, "json_schema": True, **(caps or {})})
+
+    @property
+    def label(self) -> str:
+        return f"{self.provider}:{self.model}"
 
     async def _create(self, messages: list[dict], **kw) -> str:
         if self._caps["reasoning_effort"]:
@@ -109,6 +131,12 @@ class LLMClient:
             raise LLMError(f"LLM request failed: {e}") from e
 
     async def health(self) -> tuple[bool, str | None]:
+        if self.provider == "cortex":  # Cortex has no model listing; a 1-token completion proves access
+            try:
+                await self._create([{"role": "user", "content": "ping"}], max_tokens=1)
+                return True, None
+            except Exception as e:
+                return False, str(e)[:300]
         try:
             models = await self.client.models.list()
             ids = [m.id for m in models.data]
@@ -119,6 +147,85 @@ class LLMClient:
             return False, str(e)[:300]
 
 
-def get_llm() -> LLMClient:
-    """A fresh client per call: the async HTTP pool is bound to the running event loop."""
-    return LLMClient()
+# Primary endpoints that recently failed -> monotonic time of failure. While a provider is down
+# (e.g. Cortex disabled on a trial account), calls go straight to the fallback instead of paying
+# for a failing request each time; the primary is retried after PRIMARY_RETRY_AFTER_S.
+_PRIMARY_DOWN: dict[str, float] = {}
+PRIMARY_RETRY_AFTER_S = 300
+
+
+class FallbackLLM:
+    """Try the primary provider (Snowflake Cortex); on any LLM failure use the fallback (Ollama).
+
+    `label` reports whichever provider produced the last answer, e.g. "cortex:llama3.3-70b".
+    """
+
+    def __init__(self, primary: LLMClient, fallback: LLMClient):
+        self.primary, self.fallback = primary, fallback
+        self.model, self.base_url, self.provider = primary.model, primary.base_url, primary.provider
+        self.label = primary.label
+
+    async def _call(self, method: str, *args, **kwargs):
+        down_since = _PRIMARY_DOWN.get(self.primary.base_url)
+        if down_since is None or time.monotonic() - down_since > PRIMARY_RETRY_AFTER_S:
+            try:
+                result = await getattr(self.primary, method)(*args, **kwargs)
+                _PRIMARY_DOWN.pop(self.primary.base_url, None)
+                self.label = self.primary.label
+                return result
+            except LLMError as e:
+                _PRIMARY_DOWN[self.primary.base_url] = time.monotonic()
+                log.warning("%s failed (%s); falling back to %s", self.primary.label, str(e)[:200], self.fallback.label)
+        result = await getattr(self.fallback, method)(*args, **kwargs)
+        self.label = self.fallback.label
+        return result
+
+    async def chat(self, *args, **kwargs) -> str:
+        return await self._call("chat", *args, **kwargs)
+
+    async def chat_json(self, *args, **kwargs) -> Any:
+        return await self._call("chat_json", *args, **kwargs)
+
+    async def health(self) -> tuple[bool, str | None]:
+        ok, err = await self.primary.health()
+        if ok:
+            return True, None
+        fb_ok, fb_err = await self.fallback.health()
+        note = f"{self.primary.label} unavailable ({err}); using fallback {self.fallback.label}"
+        return fb_ok, note if fb_ok else f"{note}; fallback also failed: {fb_err}"
+
+
+def cortex_llm(company_id: str) -> LLMClient | None:
+    """LLM client for Snowflake Cortex (open-weight models) using the company's own Snowflake
+    connection: its account host and PAT. Talks to Cortex's OpenAI-compatible REST API."""
+    from app.snowflake import service as sf
+
+    conn = sf.get_connection_row(company_id)
+    if conn is None:
+        return None
+    s = get_settings()
+    return LLMClient(
+        base_url=f"https://{conn.account.lower()}.snowflakecomputing.com/api/v2/cortex/v1",
+        model=s.cortex_model,
+        api_key=sf.decrypt_token(conn.token_encrypted),
+        provider="cortex",
+        default_headers={"X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"},
+        # Cortex rejects OpenAI's reasoning_effort; structured output is probed at runtime.
+        caps={"reasoning_effort": False},
+    )
+
+
+def get_llm(company_id: str | None = None) -> LLMClient | FallbackLLM:
+    """A fresh client per call: the async HTTP pool is bound to the running event loop.
+
+    LLM_PROVIDER=cortex runs on Snowflake Cortex inside the company's Snowflake account, falling
+    back to the OpenAI-compatible endpoint (local Ollama) when Cortex is unavailable and
+    LLM_FALLBACK is on. Otherwise the OpenAI-compatible endpoint is used directly.
+    """
+    s = get_settings()
+    default = LLMClient(provider="ollama" if "11434" in s.llm_base_url else "openai")
+    if s.llm_provider == "cortex" and company_id:
+        cortex = cortex_llm(company_id)
+        if cortex is not None:
+            return FallbackLLM(cortex, default) if s.llm_fallback else cortex
+    return default
