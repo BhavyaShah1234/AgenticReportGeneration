@@ -10,10 +10,13 @@ from sqlmodel import Session
 
 from app.auth.deps import current_user, require_designer
 from app.db import get_session
-from app.models import SnowflakeConnection, User, utcnow
+from app.config import get_settings
+from app.models import Company, SnowflakeConnection, User, utcnow
 from app.schemas.api import ConnectionIn, ConnectionOut, ConnectionTestOut, TableOut
 from app.snowflake import service
 from app.snowflake.client import SnowflakeClient, SnowflakeCredentials
+
+DEMO_DOMAIN = "classicmodels.com"  # seeded shared demo company (app/seed.py)
 
 router = APIRouter(tags=["snowflake"])
 
@@ -60,6 +63,10 @@ def _test_creds(creds: SnowflakeCredentials) -> dict[str, str]:
 async def put_connection(
     body: ConnectionIn, user: User = Depends(require_designer), session: Session = Depends(get_session)
 ) -> ConnectionTestOut:
+    if get_settings().demo_mode:
+        company = session.get(Company, user.company_id)
+        if company is not None and company.domain == DEMO_DOMAIN:
+            raise HTTPException(403, "The shared demo company's Snowflake connection is locked during the demo")
     existing = service.get_connection_row(user.company_id, session)
     token = (body.token or "").strip()
     if not token:
