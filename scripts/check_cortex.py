@@ -18,6 +18,7 @@ from openai import AsyncOpenAI  # noqa: E402
 from app.envutil import snowflake_env  # noqa: E402
 from app.snowflake.client import SnowflakeClient, SnowflakeCredentials  # noqa: E402
 
+REST_MODELS = sys.argv[2:] or ["llama3.1-8b", "llama3.1-70b", "llama3.3-70b"]
 MODELS = ["llama3.1-8b", "llama3.1-70b", "llama3.3-70b", "snowflake-llama-3.3-70b", "llama4-maverick",
           "mistral-large2", "mistral-7b", "mixtral-8x7b", "deepseek-r1"]
 
@@ -40,10 +41,10 @@ async def rest_probe(env: dict) -> None:
     base = f"https://{env['account'].lower()}.snowflakecomputing.com/api/v2/cortex/v1"
     client = AsyncOpenAI(base_url=base, api_key=env["token"], max_retries=0, timeout=90)
     print("== REST (OpenAI-compatible):", base.replace(env["account"].lower(), "<account>"))
-    for m in ("llama3.1-8b", "llama3.3-70b", "mistral-large2"):
+    for m in REST_MODELS:
         t = time.time()
         try:
-            r = await client.chat.completions.create(model=m, messages=[{"role": "user", "content": "Reply with OK"}], max_tokens=10)
+            r = await client.chat.completions.create(model=m, messages=[{"role": "user", "content": "Reply with OK"}], max_completion_tokens=10)
             print(f"  chat OK   {m:<16} {time.time() - t:4.1f}s {r.choices[0].message.content!r}")
         except Exception as e:
             print(f"  chat FAIL {m:<16} {type(e).__name__}: {str(e)[:160]}")
@@ -52,7 +53,7 @@ async def rest_probe(env: dict) -> None:
                   "required": ["color", "n"], "additionalProperties": False}
         try:
             r = await client.chat.completions.create(
-                model=m, messages=[{"role": "user", "content": "Give a color and a number as JSON."}], max_tokens=60,
+                model=m, messages=[{"role": "user", "content": "Give a color and a number as JSON."}], max_completion_tokens=60,
                 response_format={"type": "json_schema", "json_schema": {"name": "x", "schema": schema}})
             print(f"  json_schema OK   {m:<16} {r.choices[0].message.content!r}")
         except Exception as e:

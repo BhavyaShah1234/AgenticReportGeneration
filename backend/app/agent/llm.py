@@ -55,6 +55,23 @@ def extract_json(text: str) -> Any:
     raise LLMError("Model did not return JSON")
 
 
+def normalize_roles(messages: list[dict]) -> list[dict]:
+    """Merge all system messages into one leading system message and merge consecutive turns
+    of the same role, giving the strict sequence Cortex accepts: [system] user (assistant user)*."""
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system" and m.get("content"))
+    out: list[dict] = [{"role": "system", "content": system}] if system else []
+    for m in messages:
+        if m["role"] == "system":
+            continue
+        if out and out[-1]["role"] == m["role"]:
+            out[-1] = {"role": m["role"], "content": f"{out[-1]['content']}\n\n{m['content']}"}
+        else:
+            out.append({"role": m["role"], "content": m["content"]})
+    if len(out) == (1 if system else 0) or out[-1]["role"] != "user":
+        out.append({"role": "user", "content": "Continue."})
+    return out
+
+
 class LLMClient:
     def __init__(
         self,
@@ -85,6 +102,12 @@ class LLMClient:
         return f"{self.provider}:{self.model}"
 
     async def _create(self, messages: list[dict], **kw) -> str:
+        if self.provider == "cortex":
+            # Cortex's OpenAI-compatible API rejects the deprecated max_tokens parameter and
+            # requires one leading system message followed by alternating user/assistant turns.
+            if "max_tokens" in kw:
+                kw["max_completion_tokens"] = kw.pop("max_tokens")
+            messages = normalize_roles(messages)
         if self._caps["reasoning_effort"]:
             try:
                 r = await self.client.chat.completions.create(model=self.model, messages=messages, reasoning_effort="none", **kw)

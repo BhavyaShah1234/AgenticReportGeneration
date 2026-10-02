@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # LLM_PROVIDER=cortex: run on Snowflake Cortex open-weight models through the company's own
     # Snowflake connection; LLM_FALLBACK keeps the OpenAI-compatible endpoint above as a backup.
     llm_provider: Literal["openai", "cortex"] = "openai"
-    cortex_model: str = "llama3.3-70b"
+    cortex_model: str = "llama3.1-70b"
     llm_fallback: bool = True
 
 

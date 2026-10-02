@@ -13,6 +13,7 @@ snowflake_env()  # populate os.environ before settings are read
 from sqlmodel import Session, select  # noqa: E402
 
 from app.auth.security import hash_password  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app.db import engine, init_db  # noqa: E402
 from app.models import Company, ReportFormatRow, SnowflakeConnection, User, utcnow  # noqa: E402
 from app.schemas.report import ReportFormatBody  # noqa: E402
@@ -114,6 +115,19 @@ def seed() -> dict:
             users[role] = u
 
         out.update(provision_demo_content(s, company.id, users["designer"].id))
+
+        if get_settings().demo_mode:
+            # In the public demo every company uses the server's demo connection (see signup), so a
+            # change of Snowflake account/token is applied to all of them, not just Classic Models.
+            env = snowflake_env()
+            others = s.exec(select(SnowflakeConnection).where(SnowflakeConnection.company_id != company.id)).all()
+            for conn in others:
+                conn.account, conn.user = env["account"], env["user"]
+                conn.warehouse, conn.role = env["warehouse"], env["role"]
+                conn.token_encrypted = encrypt_token(env["token"])
+                conn.updated_at = utcnow()
+                s.add(conn)
+            out["demo_connections_refreshed"] = len(others)
         s.commit()
     return out
 
@@ -161,5 +175,7 @@ if __name__ == "__main__":
     print(f"Seeded company {result['company_id']} (Classic Models Inc.)")
     print(f"  users: designer@{DOMAIN} / viewer@{DOMAIN}  password: {PASSWORD}")
     print(f"  snowflake: {result['snowflake']}")
+    if "demo_connections_refreshed" in result:
+        print(f"  demo mode: refreshed {result['demo_connections_refreshed']} other company connection(s)")
     for name, fid in result["formats"].items():
         print(f"  format: {name} -> {fid}")

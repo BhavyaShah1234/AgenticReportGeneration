@@ -24,7 +24,7 @@ demo_env
 seed_and_build "${1:-}"
 start_servers || { scripts/demo_stop.sh >/dev/null 2>&1; exit 1; }
 
-nohup cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 > "$PID_DIR/tunnel.log" 2>&1 &
+setsid nohup cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 < /dev/null > "$PID_DIR/tunnel.log" 2>&1 &
 echo $! > "$PID_DIR/tunnel.pid"
 
 echo "Waiting for the public URL..."

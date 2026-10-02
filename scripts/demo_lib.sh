@@ -18,7 +18,7 @@ demo_env() {
   # AI runs on Snowflake Cortex open-weight models when the account allows it, falling back
   # to the local open-weight model in Ollama otherwise (e.g. Cortex is disabled on trials).
   export LLM_PROVIDER="${LLM_PROVIDER:-cortex}"
-  export CORTEX_MODEL="${CORTEX_MODEL:-llama3.3-70b}"
+  export CORTEX_MODEL="${CORTEX_MODEL:-llama3.1-70b}"
   # Left unset on purpose: the backend then uses the persistent backend/storage/.app_secret,
   # shared by the seed and the server across restarts.
   unset APP_SECRET_KEY
@@ -46,32 +46,47 @@ seed_and_build() {  # $1 = --no-build to skip the frontend build
 }
 
 start_servers() {
-  (cd backend && nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$PID_DIR/backend.log" 2>&1 & echo $! > "$PID_DIR/backend.pid")
-  (nohup npm --prefix frontend run start -- -H 127.0.0.1 -p 3000 > "$PID_DIR/frontend.log" 2>&1 & echo $! > "$PID_DIR/frontend.pid")
+  # setsid + </dev/null fully detach the servers (own session, no inherited stdin/stdout), so
+  # they survive the terminal or tool that launched them closing or being killed.
+  (cd backend && setsid nohup .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+    < /dev/null > "$PID_DIR/backend.log" 2>&1 & echo $! > "$PID_DIR/backend.pid")
+  (setsid nohup npm --prefix frontend run start -- -H 127.0.0.1 -p 3000 \
+    < /dev/null > "$PID_DIR/frontend.log" 2>&1 & echo $! > "$PID_DIR/frontend.pid")
   wait_for http://127.0.0.1:8000/api/health backend || return 1
   wait_for http://127.0.0.1:3000/login frontend || return 1
+  # setsid may fork, so $! can be a short-lived wrapper; record the PIDs that actually listen.
+  listener_pid 8000 > "$PID_DIR/backend.pid"
+  listener_pid 3000 > "$PID_DIR/frontend.pid"
   echo "Backend and frontend are up."
 }
 
+listener_pid() {  # port -> PID of the process listening on it
+  ss -ltnpH "sport = :$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true
+}
+
 stop_servers() {
+  # Best-effort cleanup: callers run under `set -euo pipefail`, so every step that may
+  # legitimately find nothing to stop is guarded with `|| true`.
   for name in frontend backend; do
     f="$PID_DIR/$name.pid"
     if [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; then
-      pkill -TERM -P "$(cat "$f")" 2>/dev/null
-      kill "$(cat "$f")" 2>/dev/null
+      pkill -TERM -P "$(cat "$f")" 2>/dev/null || true
+      kill "$(cat "$f")" 2>/dev/null || true
       echo "stopped $name"
     fi
     rm -f "$f"
   done
   # next start runs as a grandchild of npm; make sure nothing is left on the ports.
   for port in 3000 8000; do
-    pids=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u)
-    [ -n "$pids" ] && kill $pids 2>/dev/null && echo "freed port $port"
+    pids=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true)
+    if [ -n "$pids" ]; then kill $pids 2>/dev/null || true; echo "freed port $port"; fi
   done
   for _ in $(seq 1 10); do
     ss -ltnH "sport = :3000 or sport = :8000" 2>/dev/null | grep -q . || return 0
     sleep 1
   done
+  echo "WARNING: ports 3000/8000 still busy after 10s" >&2
+  return 0
 }
 
 wait_for() {  # url, name

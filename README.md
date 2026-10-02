@@ -25,7 +25,7 @@ Built for the MLH Hacktoberfest x Sunhacks hackathon. Agentic Reports is a repor
 |---|---|
 | Frontend | Next.js 16 (Node 26), React 19, Tailwind v4, react-grid-layout v2, Recharts 3, zustand |
 | Backend | FastAPI (Python 3.14), SQLModel/SQLite for app metadata, snowflake-connector-python, pandas, sqlglot, Playwright |
-| LLM (open-weight only) | **Snowflake Cortex** (`llama3.3-70b` by default, through the company's own Snowflake connection) with automatic fallback to local **Ollama `qwen3:8b`**. Any other OpenAI-compatible endpoint, such as Voyager, needs only config |
+| LLM (open-weight only) | **Snowflake Cortex** (`llama3.1-70b` by default, through the company's own Snowflake connection) with automatic fallback to local **Ollama `qwen3:8b`**. Any other OpenAI-compatible endpoint, such as Voyager, needs only config |
 | Data | Kaggle [sample-sales-data](https://www.kaggle.com/datasets/kyanyoga/sample-sales-data) in `DEMO_CORP.SALES`: 2,823 order lines, 92 B2B clients, 2003–2005 (see `data/README.md`) |
 
 ```
@@ -40,10 +40,10 @@ docs/API.md  HTTP contract
 | `LLM_PROVIDER` | What runs the agent and narratives |
 |---|---|
 | `openai` (default) | The OpenAI-compatible endpoint at `LLM_BASE_URL` / `LLM_MODEL`. The default is local Ollama `qwen3:8b`; Voyager and vLLM also work. |
-| `cortex` | **Snowflake Cortex** inside each company's own Snowflake account, using its connection (account and PAT) and Cortex's OpenAI-compatible REST API (`/api/v2/cortex/v1`). The model is `CORTEX_MODEL`, default `llama3.3-70b`; `mistral-large2` and `llama3.1-8b` are other options. With `LLM_FALLBACK=true` (the default), a failing Cortex call falls back to the endpoint above, and Cortex is retried after 5 minutes. |
+| `cortex` | **Snowflake Cortex** inside each company's own Snowflake account, using its connection (account and PAT) and Cortex's OpenAI-compatible REST API (`/api/v2/cortex/v1`). The model is `CORTEX_MODEL`, default `llama3.1-70b`; `llama3.1-8b` and `mistral-7b` also work over REST. Requests are normalised for Cortex: `max_completion_tokens`, plus a single leading system message. With `LLM_FALLBACK=true` (the default), a failing Cortex call falls back to the endpoint above, and Cortex is retried after 5 minutes. |
 
 Each AI narrative in a generated report names the model that wrote it. `GET /api/agent/health` shows the active provider. `scripts/check_cortex.py` probes which Cortex models your account can use.
-**Note:** Snowflake disables Cortex AI functions on *trial* accounts. Every model returns `399258 … not available for trial accounts`, and the REST API returns 403. Use the account provided by the event organisers, or a non-trial account, to run on Cortex. Until then the demo answers from the local open-weight fallback.
+**Account note:** a standard Snowflake *trial* account blocks Cortex (`399258 … not available for trial accounts`, REST 403). Accounts created through MLH’s sign-up link (https://mlh.link/snowflake-signup) have Cortex enabled. Create the PAT with the network-policy exception, or attach a network policy to the user. Until Cortex is reachable, the app answers from the local open-weight fallback.
 
 ## Run locally
 ```bash

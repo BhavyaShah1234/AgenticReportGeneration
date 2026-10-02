@@ -24,10 +24,10 @@ def cortex_mode(monkeypatch):
     yield
 
 
-def _company_with_connection(account: str = "MYORG-ACCT1", token: str = "pat-secret-value") -> str:
+def _company_with_connection(account: str = "MYORG-ACCT1", token: str = "pat-secret-value", user: str = "U") -> str:
     me = signup(new_client())
     with Session(engine) as s:
-        s.add(SnowflakeConnection(company_id=me["company"]["id"], account=account, user="U", token_encrypted=encrypt_token(token)))
+        s.add(SnowflakeConnection(company_id=me["company"]["id"], account=account, user=user, token_encrypted=encrypt_token(token)))
         s.commit()
     return me["company"]["id"]
 
@@ -42,7 +42,7 @@ def test_cortex_uses_company_account_and_open_weight_model(cortex_mode):
     llm = get_llm(company_id)
     assert isinstance(llm, FallbackLLM)
     assert llm.primary.base_url == "https://myorg-acct1.snowflakecomputing.com/api/v2/cortex/v1"
-    assert llm.primary.model == "llama3.3-70b" and llm.label == "cortex:llama3.3-70b"
+    assert llm.primary.model == "llama3.1-70b" and llm.label == "cortex:llama3.1-70b"
     assert llm.primary.client.api_key == "pat-secret-value"
     assert llm.primary._caps["reasoning_effort"] is False
     assert llm.fallback.base_url == get_settings().llm_base_url
@@ -66,12 +66,56 @@ class _Fake:
 
 
 def test_fallback_switches_provider_and_label():
-    f = FallbackLLM(_Fake("cortex:llama3.3-70b", fail=True), _Fake("ollama:qwen3:8b", fail=False))  # type: ignore[arg-type]
+    llm_mod._PRIMARY_DOWN.clear()
+    f = FallbackLLM(_Fake("cortex:llama3.1-70b", fail=True), _Fake("ollama:qwen3:8b", fail=False))  # type: ignore[arg-type]
     assert asyncio.run(f.chat([])) == "answer from ollama:qwen3:8b"
     assert f.label == "ollama:qwen3:8b"
-    ok = FallbackLLM(_Fake("cortex:llama3.3-70b", fail=False), _Fake("ollama:qwen3:8b", fail=False))  # type: ignore[arg-type]
-    assert asyncio.run(ok.chat([])) == "answer from cortex:llama3.3-70b"
-    assert ok.label == "cortex:llama3.3-70b"
+
+    # A failed primary is skipped (not re-called) until PRIMARY_RETRY_AFTER_S passes.
+    recovered = FallbackLLM(_Fake("cortex:llama3.1-70b", fail=False), _Fake("ollama:qwen3:8b", fail=False))  # type: ignore[arg-type]
+    assert asyncio.run(recovered.chat([])) == "answer from ollama:qwen3:8b"
+
+    llm_mod._PRIMARY_DOWN.clear()
+    ok = FallbackLLM(_Fake("cortex:llama3.1-70b", fail=False), _Fake("ollama:qwen3:8b", fail=False))  # type: ignore[arg-type]
+    assert asyncio.run(ok.chat([])) == "answer from cortex:llama3.1-70b"
+    assert ok.label == "cortex:llama3.1-70b"
+
+
+def test_normalize_roles_for_cortex():
+    msgs = [
+        {"role": "system", "content": "A"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "bad"},
+        {"role": "user", "content": "fix it"},
+        {"role": "system", "content": "schema hint"},
+    ]
+    out = llm_mod.normalize_roles(msgs)
+    assert [m["role"] for m in out] == ["system", "user", "assistant", "user"]
+    assert out[0]["content"] == "A\n\nschema hint"
+    assert llm_mod.normalize_roles([{"role": "user", "content": "a"}, {"role": "user", "content": "b"}]) == [
+        {"role": "user", "content": "a\n\nb"}
+    ]
+
+
+@pytest.mark.snowflake
+@pytest.mark.llm
+def test_live_cortex_designs_widget(cortex_mode):
+    """The real agent loop (schema prompt, structured output, validation) on Cortex, no fallback."""
+    from app.agent import service as agent_service
+    from app.envutil import snowflake_env
+
+    if os.environ.get("EXPECT_CORTEX") != "1":
+        pytest.skip("set EXPECT_CORTEX=1 to require a Cortex-enabled account")
+    env = snowflake_env()
+    company_id = _company_with_connection(env["account"], env["token"], env["user"])
+    get_settings().llm_fallback = False
+    try:
+        widget, _ = asyncio.run(
+            agent_service.design_widget(company_id, "monthly sales as a line chart", "DEMO_CORP.SALES.V_SALES", [], [])
+        )
+    finally:
+        get_settings().llm_fallback = True
+    assert widget.type in {"line", "area"} and widget.archetype and widget.archetype.id in {"time_series", "moving_average"}
 
 
 @pytest.mark.snowflake
@@ -81,7 +125,7 @@ def test_live_cortex_or_fallback(cortex_mode):
     from app.envutil import snowflake_env
 
     env = snowflake_env()
-    company_id = _company_with_connection(env["account"], env["token"])
+    company_id = _company_with_connection(env["account"], env["token"], env["user"])
     llm = get_llm(company_id)
     text = asyncio.run(llm.chat([{"role": "user", "content": "Reply with the single word OK."}], max_tokens=20))
     assert text.strip()
