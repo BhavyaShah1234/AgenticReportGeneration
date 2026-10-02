@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# App runtime data (SQLite DB, generated PDFs)
+backend/storage/

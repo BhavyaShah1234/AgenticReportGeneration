@@ -1,0 +1,9 @@
+[project]
+name = "agentic-report-backend"
+version = "0.1.0"
+requires-python = ">=3.14"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = ["snowflake: needs live Snowflake credentials", "llm: needs a running LLM endpoint"]
